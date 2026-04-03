@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MHN Lance Meta Generator</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/hyperformula@3.2.0/dist/hyperformula.full.min.js"></script>
+    <script src="./data/workbook-data.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div>
+          <h1>MHN Lance Meta Generator - Beta!</h1>
+          <p>Created by Phask, using KreaTV1 calc sheet (3.6.0), built for Scorch, Zuu and #lance (works for other weapons too...)</p>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <h2>Calculator</h2>
+          </div>
+          <div class="calculator-layout">
+            <div>
+              <div class="calculator-grid">
+                <label class="field">
+                  <span>Build</span>
+                  <select id="calculator-build"></select>
+                </label>
+                <label class="field">
+                  <span>Weapon</span>
+                  <select id="calculator-weapon"></select>
+                </label>
+              </div>
+              <div class="result-grid" id="result-grid"></div>
+              <div class="calculator-actions" id="calculator-actions"></div>
+            </div>
+            <aside class="skill-summary">
+              <h3>Active Skills</h3>
+              <div id="skill-summary-list"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Builds</h2>
+          </div>
+          <div class="library-controls">
+            <button id="new-build" type="button">New Build</button>
+          </div>
+          <div class="library-list" id="build-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Weapons</h2>
+          </div>
+          <div class="library-controls">
+            <button id="new-weapon" type="button">New Weapon</button>
+          </div>
+          <div class="library-list" id="weapon-list"></div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <h2>Build Editor</h2>
+          </div>
+          <form id="build-form" class="editor-form"></form>
+        </section>
+
+        <section class="panel weapon-editor-panel">
+          <div class="panel-header">
+            <h2>Weapon Editor</h2>
+          </div>
+          <form id="weapon-form" class="editor-form"></form>
+        </section>
+      </main>
+      <footer class="app-footer-actions">
+        <button id="export-data" type="button">Export</button>
+        <button id="import-data" type="button">Import</button>
+      </footer>
+    </div>
+
+    <div class="modal-overlay hidden" id="rift-modal">
+      <div class="modal-window">
+        <div class="panel-header">
+          <h2 id="modal-title">Rift Combinations</h2>
+          <button class="secondary modal-close-button" id="close-rift-modal" type="button" aria-label="Close">X</button>
+        </div>
+        <div id="rift-modal-content"></div>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
