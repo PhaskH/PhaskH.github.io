@@ -257,6 +257,27 @@ button.danger:hover {
   font-weight: 600;
 }
 
+.library-item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.library-item-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.library-item-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
 .library-item-meta {
   color: var(--muted);
   font-size: 0.84rem;
@@ -314,7 +335,7 @@ button.danger:hover {
 .weapon-editor-panel {
   grid-column: span 4;
   justify-self: start;
-  width: min(100%, 440px);
+  width: min(100%, 520px);
 }
 
 .build-editor-grid {
@@ -344,7 +365,18 @@ button.danger:hover {
 }
 
 .editor-row.weapon-row {
-  grid-template-columns: minmax(150px, max-content) 108px;
+  grid-template-columns: minmax(150px, max-content) minmax(220px, 1fr);
+}
+
+.editor-row.editor-row-active {
+  background: rgba(83, 179, 125, 0.1);
+  border: 1px solid rgba(83, 179, 125, 0.22);
+  border-radius: 10px;
+  padding: 6px 8px;
+}
+
+.editor-row.editor-row-active .editor-label {
+  color: #d7f2e1;
 }
 
 .editor-row .editor-label {
@@ -358,6 +390,21 @@ button.danger:hover {
   min-height: 32px;
   padding: 6px 8px;
   border-radius: 8px;
+}
+
+.weapon-adjuster {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+.weapon-adjuster-button {
+  min-height: 32px;
+  width: auto;
+  padding: 6px 10px;
+  white-space: nowrap;
 }
 
 .editor-toolbar input,

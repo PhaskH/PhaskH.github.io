@@ -251,6 +251,7 @@ function normalizeImportedBuild(item) {
     ...item,
     id: makeId(),
     name: String(item?.name || "Imported Build"),
+    compareEnabled: typeof item?.compareEnabled === "boolean" ? item.compareEnabled : true,
     values: {
       ...base.values,
       ...(item?.values && typeof item.values === "object" ? item.values : {}),
@@ -265,6 +266,7 @@ function normalizeImportedWeapon(item) {
     ...item,
     id: makeId(),
     name: String(item?.name || "Imported Weapon"),
+    compareEnabled: typeof item?.compareEnabled === "boolean" ? item.compareEnabled : true,
     values: {
       ...base.values,
       ...(item?.values && typeof item.values === "object" ? item.values : {}),
@@ -356,6 +358,7 @@ function buildDefaultBuild() {
   return {
     id: makeId(),
     name: "Default Build",
+    compareEnabled: true,
     values: Object.fromEntries(
       state.data.buildFields.map((field) => [field.ref, 0]),
     ),
@@ -373,6 +376,7 @@ function buildDefaultWeapon() {
     name: "Default Weapon",
     values,
     isRift: false,
+    compareEnabled: true,
   };
 }
 
@@ -503,7 +507,7 @@ function renderCalculatorActions() {
   const selectedWeaponId = els.calculatorWeapon.value || state.selectedWeaponId;
   const weapon = getWeaponById(selectedWeaponId);
   const actions = [
-    `<button id="compare-build-weapon-matrix" type="button">Compare All Build/Weapon Combinations</button>`,
+    `<button id="compare-build-weapon-matrix" type="button">Compare selected Builds/Weapons</button>`,
   ];
   if (weapon?.isRift) {
     actions.push(`<button id="compare-rift" type="button">Compare Rift Combinations</button>`);
@@ -572,7 +576,10 @@ function renderLibraryList(targetEl, items, selectedId, editHandlerName, deleteH
     .map(
       (item) => `
         <div class="library-item ${item.id === selectedId ? "selected" : ""}">
-          <div>
+          <div class="library-item-main">
+            <label class="library-item-check">
+              <input type="checkbox" data-action="toggle-compare" data-id="${item.id}" ${item.compareEnabled !== false ? "checked" : ""} />
+            </label>
             <div class="library-item-name">${escapeHtml(item.name)}</div>
           </div>
           <div class="library-item-actions">
@@ -619,6 +626,7 @@ function renderBuildForm() {
     .map((field) => {
       const label = labels[field.ref] ?? field.labelRef;
       const value = state.buildDraft.values[field.ref];
+      const isActive = Number(value) !== 0;
       const inputMarkup = field.options
         ? `<select data-build-field="${field.ref}">
             ${field.options
@@ -631,7 +639,7 @@ function renderBuildForm() {
         : `<input type="number" step="any" value="${escapeHtml(String(value ?? ""))}" data-build-field="${field.ref}" />`;
 
       return `
-        <div class="editor-row">
+        <div class="editor-row ${isActive ? "editor-row-active" : ""}">
           <label class="editor-label" for="build-${field.ref}">${escapeHtml(String(label))}</label>
           ${inputMarkup.replace("data-build-field", `id="build-${field.ref}" data-build-field`)}
         </div>
@@ -677,6 +685,9 @@ function renderBuildForm() {
       const schema = buildSchemaMap()[ref];
       const nextValue = valueFromDefault(event.target.value, schema.defaultValue);
       state.buildDraft.values[ref] = nextValue;
+      event.target
+        .closest(".editor-row")
+        ?.classList.toggle("editor-row-active", Number(nextValue) !== 0);
     });
   });
 
@@ -694,7 +705,8 @@ function renderWeaponForm() {
   const labels = getWeaponLabels(state.weaponDraft);
   const fieldsMarkup = state.data.weaponFields
     .map((field) => {
-      const label = labels[field.ref] ?? field.labelRef;
+      const baseLabel = labels[field.ref] ?? field.labelRef;
+      const label = field.ref === "E6" ? `${baseLabel} %` : baseLabel;
       const value = state.weaponDraft.values[field.ref];
       const options =
         field.ref === "E5"
@@ -713,8 +725,18 @@ function renderWeaponForm() {
             .join("")}
         </select>`;
       } else {
-        const step = field.ref === "E6" ? "0.1" : "any";
-        inputMarkup = `<input type="number" step="${step}" value="${escapeHtml(displayWeaponValue(field.ref, value))}" data-weapon-field="${field.ref}" />`;
+        const increment = field.ref === "E3" || field.ref === "E4" ? 100 : field.ref === "E6" ? 10 : null;
+        if (increment) {
+          inputMarkup = `
+            <div class="weapon-adjuster">
+              <input type="number" min="0" step="any" value="${escapeHtml(displayWeaponValue(field.ref, value))}" data-weapon-field="${field.ref}" />
+              <button class="secondary weapon-adjuster-button" type="button" data-weapon-step="${field.ref}" data-step-direction="-1">-${increment}</button>
+              <button class="secondary weapon-adjuster-button" type="button" data-weapon-step="${field.ref}" data-step-direction="1">+${increment}</button>
+            </div>
+          `;
+        } else {
+          inputMarkup = `<input type="number" min="0" step="any" value="${escapeHtml(displayWeaponValue(field.ref, value))}" data-weapon-field="${field.ref}" />`;
+        }
       }
 
       return `
@@ -740,7 +762,7 @@ function renderWeaponForm() {
     </div>
     <div class="checkbox-row">
       <input id="weapon-is-rift" type="checkbox" ${state.weaponDraft.isRift ? "checked" : ""} />
-      <label class="editor-label" for="weapon-is-rift">Rift base weapon</label>
+      <label class="editor-label" for="weapon-is-rift">Rift base weapon (no upgrades)</label>
     </div>
     <div class="editor-grid weapon-editor-stack">${fieldsMarkup}</div>
   `;
@@ -776,6 +798,22 @@ function renderWeaponForm() {
       if (ref === "E5") {
         renderWeaponForm();
       }
+    });
+  });
+
+  els.weaponForm.querySelectorAll("[data-weapon-step]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const ref = event.currentTarget.dataset.weaponStep;
+      const direction = Number(event.currentTarget.dataset.stepDirection);
+      const amount = ref === "E3" || ref === "E4" ? 100 : ref === "E6" ? 10 : 0;
+      const input = els.weaponForm.querySelector(`[data-weapon-field="${ref}"]`);
+      const currentValue = Number(input?.value ?? 0);
+      const nextValue = Math.max(0, (Number.isFinite(currentValue) ? currentValue : 0) + direction * amount);
+      if (input) {
+        input.value = String(nextValue);
+      }
+      const schema = weaponSchemaMap()[ref];
+      state.weaponDraft.values[ref] = normalizeWeaponValue(ref, nextValue, schema.defaultValue);
     });
   });
 }
@@ -1105,14 +1143,23 @@ function buildMatrixKey(buildId, weaponId) {
 }
 
 function openBuildWeaponComparison() {
-  if (!state.builds.length || !state.weapons.length) {
+  const buildsToCompare = state.builds.filter((build) => build.compareEnabled !== false);
+  const weaponsToCompare = state.weapons.filter((weapon) => weapon.compareEnabled !== false);
+  if (!buildsToCompare.length || !weaponsToCompare.length) {
+    els.modalTitle.textContent = "Build and Weapon Comparison";
+    els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-medium");
+    els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
+    els.riftModalContent.innerHTML = `
+      <div class="comparison-intro">Select at least one build and one weapon with the checkboxes before running the comparison.</div>
+    `;
+    els.riftModal.classList.remove("hidden");
     return;
   }
 
   const engine = createEngine();
   const results = {};
-  for (const weapon of state.weapons) {
-    for (const build of state.builds) {
+  for (const weapon of weaponsToCompare) {
+    for (const build of buildsToCompare) {
       applyScenario(engine, build, weapon);
       results[buildMatrixKey(build.id, weapon.id)] = readCell(engine, "Calculator1", state.data.resultCell);
     }
@@ -1120,8 +1167,12 @@ function openBuildWeaponComparison() {
 
   state.matrixComparison = {
     results,
-    referenceBuildId: state.selectedBuildId,
-    referenceWeaponId: state.selectedWeaponId,
+    buildIds: buildsToCompare.map((build) => build.id),
+    weaponIds: weaponsToCompare.map((weapon) => weapon.id),
+    referenceBuildId:
+      buildsToCompare.find((build) => build.id === state.selectedBuildId)?.id ?? buildsToCompare[0].id,
+    referenceWeaponId:
+      weaponsToCompare.find((weapon) => weapon.id === state.selectedWeaponId)?.id ?? weaponsToCompare[0].id,
   };
   renderBuildWeaponComparison();
 }
@@ -1230,10 +1281,12 @@ function renderBuildWeaponComparison() {
     return;
   }
 
-  const { referenceBuildId, referenceWeaponId, results } = state.matrixComparison;
+  const { referenceBuildId, referenceWeaponId, results, buildIds, weaponIds } = state.matrixComparison;
+  const buildsToCompare = buildIds.map((id) => getBuildById(id)).filter(Boolean);
+  const weaponsToCompare = weaponIds.map((id) => getWeaponById(id)).filter(Boolean);
   const referenceValue = results[buildMatrixKey(referenceBuildId, referenceWeaponId)];
 
-  const headerCells = state.builds
+  const headerCells = buildsToCompare
     .map(
       (build) => `
         <th scope="col" class="comparison-header-cell">
@@ -1243,9 +1296,9 @@ function renderBuildWeaponComparison() {
     )
     .join("");
 
-  const bodyRows = state.weapons
+  const bodyRows = weaponsToCompare
     .map((weapon) => {
-      const cells = state.builds
+      const cells = buildsToCompare
         .map((build) => {
           const key = buildMatrixKey(build.id, weapon.id);
           const value = results[key];
@@ -1377,19 +1430,41 @@ function wireGlobalEvents() {
 
   document.body.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
-    if (!button) {
+    if (button) {
+      const { action, id } = button.dataset;
+      if (action === "edit-build") {
+        editBuild(id);
+      } else if (action === "delete-build") {
+        deleteBuild(id);
+      } else if (action === "edit-weapon") {
+        editWeapon(id);
+      } else if (action === "delete-weapon") {
+        deleteWeapon(id);
+      }
       return;
     }
 
-    const { action, id } = button.dataset;
-    if (action === "edit-build") {
-      editBuild(id);
-    } else if (action === "delete-build") {
-      deleteBuild(id);
-    } else if (action === "edit-weapon") {
-      editWeapon(id);
-    } else if (action === "delete-weapon") {
-      deleteWeapon(id);
+    const checkbox = event.target.closest('input[data-action="toggle-compare"]');
+    if (!checkbox) {
+      return;
+    }
+
+    const containerId = checkbox.closest("[id]")?.id;
+    if (containerId === "build-list") {
+      state.builds = state.builds.map((build) =>
+        build.id === checkbox.dataset.id ? { ...build, compareEnabled: checkbox.checked } : build,
+      );
+      persistBuilds();
+      renderBuildList();
+      return;
+    }
+
+    if (containerId === "weapon-list") {
+      state.weapons = state.weapons.map((weapon) =>
+        weapon.id === checkbox.dataset.id ? { ...weapon, compareEnabled: checkbox.checked } : weapon,
+      );
+      persistWeapons();
+      renderWeaponList();
     }
   });
 
@@ -1430,11 +1505,20 @@ async function init() {
     persistWeapons();
   }
 
+  state.builds = state.builds.map((build) => ({
+    ...buildDefaultBuild(),
+    ...build,
+    values: { ...buildDefaultBuild().values, ...build.values },
+    compareEnabled: typeof build.compareEnabled === "boolean" ? build.compareEnabled : true,
+  }));
+  persistBuilds();
+
   state.weapons = state.weapons.map((weapon) => ({
     ...buildDefaultWeapon(),
     ...weapon,
     values: { ...buildDefaultWeapon().values, ...weapon.values },
     isRift: Boolean(weapon.isRift),
+    compareEnabled: typeof weapon.compareEnabled === "boolean" ? weapon.compareEnabled : true,
   }));
   persistWeapons();
 
