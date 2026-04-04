@@ -576,9 +576,13 @@ function renderCalculatorActions() {
 
 function renderSelectionActions() {
   els.selectionActions.innerHTML = `
-    <button id="compare-build-weapon-matrix" type="button">Compare Selected Builds & Weapons</button>
-    <button id="view-edit-uptimes" type="button">View/Edit Uptimes</button>
-    <div class="selection-actions-help">Select the builds and weapons you want to compare below, then click the button.</div>
+    <div class="selection-actions-row">
+      <button id="compare-build-weapon-matrix" type="button">Compare Selected Builds & Weapons</button>
+      <div class="selection-actions-help">Select the builds and weapons you want to compare below, then click the button.</div>
+    </div>
+    <div class="selection-actions-row">
+      <button id="view-edit-uptimes" type="button">View/Edit Uptimes</button>
+    </div>
   `;
   els.selectionActions
     .querySelector("#compare-build-weapon-matrix")
@@ -613,7 +617,8 @@ function renderUptimesModal() {
   }
 
   els.modalTitle.textContent = "View/Edit Uptimes";
-  els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-medium");
+  els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-uptime");
+  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-medium");
   els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
   els.riftModalContent.innerHTML = `
     <div class="editor-actions-row uptime-actions-row">
@@ -1514,6 +1519,7 @@ function closeModal() {
   state.uptimeDraft = null;
   els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
   els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-medium");
+  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-uptime");
   els.riftModal.classList.add("hidden");
   els.riftModalContent.innerHTML = "";
 }

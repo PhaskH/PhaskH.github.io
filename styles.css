@@ -125,6 +125,13 @@ select {
 
 .selection-actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.selection-actions-row {
+  display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 14px;
@@ -560,6 +567,10 @@ button.danger:hover {
 
 .modal-window.modal-window-medium {
   width: min(760px, 100%);
+}
+
+.modal-window.modal-window-uptime {
+  width: min(560px, 100%);
 }
 
 .modal-close-button {
