@@ -869,16 +869,17 @@ function renderWeaponForm() {
         </select>`;
       } else {
         const increment = field.ref === "E3" || field.ref === "E4" ? 100 : field.ref === "E6" ? 10 : null;
+        const minAttr = field.ref === "E6" ? "" : ' min="0"';
         if (increment) {
           inputMarkup = `
             <div class="weapon-adjuster">
-              <input type="number" min="0" step="any" value="${escapeHtml(displayWeaponValue(field.ref, value))}" data-weapon-field="${field.ref}" />
+              <input type="number"${minAttr} step="any" value="${escapeHtml(displayWeaponValue(field.ref, value))}" data-weapon-field="${field.ref}" />
               <button class="secondary weapon-adjuster-button" type="button" data-weapon-step="${field.ref}" data-step-direction="-1">-${increment}</button>
               <button class="secondary weapon-adjuster-button" type="button" data-weapon-step="${field.ref}" data-step-direction="1">+${increment}</button>
             </div>
           `;
         } else {
-          inputMarkup = `<input type="number" min="0" step="any" value="${escapeHtml(displayWeaponValue(field.ref, value))}" data-weapon-field="${field.ref}" />`;
+          inputMarkup = `<input type="number"${minAttr} step="any" value="${escapeHtml(displayWeaponValue(field.ref, value))}" data-weapon-field="${field.ref}" />`;
         }
       }
 
@@ -951,7 +952,10 @@ function renderWeaponForm() {
       const amount = ref === "E3" || ref === "E4" ? 100 : ref === "E6" ? 10 : 0;
       const input = els.weaponForm.querySelector(`[data-weapon-field="${ref}"]`);
       const currentValue = Number(input?.value ?? 0);
-      const nextValue = Math.max(0, (Number.isFinite(currentValue) ? currentValue : 0) + direction * amount);
+      const nextValue =
+        ref === "E6"
+          ? (Number.isFinite(currentValue) ? currentValue : 0) + direction * amount
+          : Math.max(0, (Number.isFinite(currentValue) ? currentValue : 0) + direction * amount);
       if (input) {
         input.value = String(nextValue);
       }
