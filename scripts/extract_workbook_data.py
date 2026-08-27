@@ -13,12 +13,76 @@ NS = {
 }
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "[MHNow] Damage Calculator v3.6.3.xlsx"
+SOURCE = ROOT / "scripts" / "[MHNow] Damage Calculator v3.6.4.xlsx"
 OUTPUT = ROOT / "data" / "workbook-data.json"
 OUTPUT_JS = ROOT / "data" / "workbook-data.js"
-SHEET_VERSION = "3.6.3"
+SHEET_VERSION = "3.6.4"
 CALCULATOR_SHEET_CANDIDATES = ("Calculator", "Calculator1")
 WEAPON_FIELD_ROWS = range(3, 8)
+
+CELL_VALUE_OVERRIDES = {
+    ("Calculator", "A26"): "Elemental Release",
+    ("Calculator", "D31"): "Elemental Release",
+}
+
+CACHED_FORMULA_CELLS = {
+    ("Backyard", "D2"),
+    ("Calculator", "J23"),
+    ("Calculator", "H24"),
+    ("Riftborne", "A4"),
+    ("Skills", "A3"),
+    ("Skills", "B3"),
+    ("Skills", "D3"),
+}
+
+FORMULA_OVERRIDES = {
+    ("Backyard", "AO3"): (
+        'countif(Calculator!$E$19:$E$21,"Affinity")*'
+        'if($B$5="Element",index(Riftborne!$J$3:$J$6,match("Affinity",Riftborne!$H$3:$H$6,0)),'
+        'if($B$5="Status",index(Riftborne!$K$3:$K$6,match("Affinity",Riftborne!$H$3:$H$6,0)),'
+        'index(Riftborne!$I$3:$I$6,match("Affinity",Riftborne!$H$3:$H$6,0))))/100'
+    ),
+    ("Backyard", "I9"): "59/65",
+    ("Backyard", "BL9"): (
+        'if($B$7="Switch Axe",0.11,'
+        'if(Calculator!$E$7="Charge Blade (Power)",0.37,'
+        'if(Calculator!$E$7="Charge Blade (Impact)",0.25,if(TRUE(),0,FALSE()))))'
+    ),
+    ("Backyard", "H17"): (
+        'if(and($H$13,$H$14,$H$15),H$11,'
+        'if(and($H$14,$H$15),H$9,'
+        'if(and($H$13,$H$15),H$8,'
+        'if(and($H$13,$H$14),H$7,'
+        'if($H$15,H$5,if($H$14,H$4,if($H$13,H$3,if(TRUE(),0,FALSE()))))))))'
+    ),
+    ("Backyard", "H18"): (
+        'if(and($H$13,$H$14,$H$15),I$11,'
+        'if(and($H$14,$H$15),I$9,'
+        'if(and($H$13,$H$15),I$8,'
+        'if(and($H$13,$H$14),I$7,'
+        'if($H$15,I$5,if($H$14,I$4,if($H$13,I$3,if(TRUE(),0,FALSE()))))))))'
+    ),
+    ("Calculator", "I8"): (
+        'if(Backyard!$B$5="Element","EF Element",'
+        'if(Backyard!$B$5="Status","EF Buildup",if(TRUE(),"/",FALSE())))'
+    ),
+    ("Calculator", "J8"): (
+        'if(Backyard!$B$5="Element","Critical Element",'
+        'if(Backyard!$B$5="Status","Ailment Chance",if(TRUE(),"/",FALSE())))'
+    ),
+    ("Calculator", "H9"): (
+        'if(Backyard!$B$5="Element",Backyard!$BF$4,'
+        'if(Backyard!$B$5="Status",Backyard!$BI$2,if(TRUE(),0,FALSE())))'
+    ),
+    ("Calculator", "I9"): (
+        'if(Backyard!$B$5="Element",Backyard!$BF$14,'
+        'if(Backyard!$B$5="Status",Backyard!$BI$8,if(TRUE(),0,FALSE())))'
+    ),
+    ("Calculator", "J9"): (
+        'if(Backyard!$B$5="Element",Backyard!$BF$4/Backyard!$BF$2-1,'
+        'if(Backyard!$B$5="Status",Backyard!$BI$6,if(TRUE(),0,FALSE())))'
+    ),
+}
 
 
 def col_to_num(col: str) -> int:
@@ -73,6 +137,8 @@ def semantic_key(label: str) -> str:
 
 def field_key(ref: str, label: object, field_kind: str) -> str:
     if field_kind == "build":
+        if label in ("Element Release", "Elemental Release"):
+            return "elementalRelease"
         if ref == "B3":
             return "elementalAttack"
         if ref == "B4":
@@ -95,7 +161,9 @@ def field_key(ref: str, label: object, field_kind: str) -> str:
 
 
 def sanitize_formula(sheet: str, ref: str, formula: str) -> str:
-    if sheet == "Backyard" and ref == "S2":
+    if (sheet, ref) in FORMULA_OVERRIDES:
+        formula = FORMULA_OVERRIDES[(sheet, ref)]
+    elif sheet == "Backyard" and ref == "S2":
         formula = (
             'IF($B$5="Raw",INDEX(Riftborne!$B$4:$B$24,MATCH(Calculator!$E$18,Riftborne!$A$4:$A$24,0)),'
             'IF($B$5="Element",INDEX(Riftborne!$C$4:$C$24,MATCH(Calculator!$E$18,Riftborne!$A$4:$A$24,0)),'
@@ -290,21 +358,21 @@ def main() -> None:
 
                 formula = cell.find("a:f", NS)
                 value = cell.find("a:v", NS)
-                if formula is not None and formula.text:
+                cached_value = normalize_scalar(
+                    None if value is None else value.text,
+                    cell.attrib.get("t"),
+                    shared_strings,
+                )
+                cached_value = CELL_VALUE_OVERRIDES.get((sheet_name, ref), cached_value)
+                if formula is not None and (sheet_name, ref) in CACHED_FORMULA_CELLS:
+                    content = cached_value
+                elif formula is not None and formula.text:
                     content: object = sanitize_formula(sheet_name, ref, formula.text)
                 else:
-                    content = normalize_scalar(
-                        None if value is None else value.text,
-                        cell.attrib.get("t"),
-                        shared_strings,
-                    )
+                    content = cached_value
 
                 if value is not None:
-                    workbook_values[sheet_name][ref] = normalize_scalar(
-                        value.text,
-                        cell.attrib.get("t"),
-                        shared_strings,
-                    )
+                    workbook_values[sheet_name][ref] = cached_value
                 elif formula is None:
                     workbook_values[sheet_name][ref] = None
 

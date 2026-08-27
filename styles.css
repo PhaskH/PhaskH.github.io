@@ -40,11 +40,6 @@ select {
   margin-bottom: 24px;
 }
 
-.version-switch {
-  margin: 0 0 8px;
-  font-size: 0.9rem;
-}
-
 .app-header h1 {
   margin: 0 0 8px;
   font-size: 1.8rem;
@@ -517,6 +512,11 @@ button.danger:hover {
   column-gap: 12px;
   align-items: center;
   padding: 4px 0;
+}
+
+.editor-row-placeholder {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .editor-row.weapon-row {

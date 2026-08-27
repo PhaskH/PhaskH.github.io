@@ -1,4 +1,12 @@
 const STORAGE_KEYS = {
+  builds: "mhn_builds_v2",
+  weapons: "mhn_weapons_v2",
+  selectedBuildId: "mhn_selected_build_v2",
+  selectedWeaponId: "mhn_selected_weapon_v2",
+  uptimes: "mhn_uptimes_v2",
+};
+
+const PREVIOUS_STORAGE_KEYS = {
   builds: "mhn_builds_v363",
   weapons: "mhn_weapons_v363",
   selectedBuildId: "mhn_selected_build_v363",
@@ -226,6 +234,14 @@ function getBuildEditorColumnCount() {
   return Math.max(1, Math.floor((gridWidth + gap) / (minColumnWidth + gap)));
 }
 
+function sortBuildFieldsAlphabetically(fields, labels) {
+  return [...fields].sort((left, right) => {
+    const leftLabel = String(labels[left.ref] ?? left.labelRef);
+    const rightLabel = String(labels[right.ref] ?? right.labelRef);
+    return leftLabel.localeCompare(rightLabel, undefined, { sensitivity: "base" });
+  });
+}
+
 function orderBuildFieldsByVisibleColumn(fields) {
   const columnCount = getBuildEditorColumnCount();
   if (columnCount <= 1) {
@@ -233,14 +249,23 @@ function orderBuildFieldsByVisibleColumn(fields) {
   }
 
   const rowCount = Math.ceil(fields.length / columnCount);
+  const shortColumnSize = Math.floor(fields.length / columnCount);
+  const longColumnCount = fields.length % columnCount;
+  const columnSizes = Array.from(
+    { length: columnCount },
+    (_, index) => shortColumnSize + (index < longColumnCount ? 1 : 0),
+  );
+  const columnStarts = [];
+  columnSizes.reduce((start, size) => {
+    columnStarts.push(start);
+    return start + size;
+  }, 0);
   const ordered = [];
 
   for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
     for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
-      const sourceIndex = columnIndex * rowCount + rowIndex;
-      if (fields[sourceIndex]) {
-        ordered.push(fields[sourceIndex]);
-      }
+      const sourceIndex = columnStarts[columnIndex] + rowIndex;
+      ordered.push(rowIndex < columnSizes[columnIndex] ? fields[sourceIndex] : null);
     }
   }
 
@@ -383,6 +408,28 @@ function fieldKeyToRefMap(fields) {
   return Object.fromEntries(fields.map((field) => [field.key ?? field.ref, field.ref]));
 }
 
+function previousVersionRefToKeyMap(fields, insertedKey) {
+  const insertedField = fields.find((field) => field.key === insertedKey);
+  const insertedMatch = insertedField?.ref?.match(/^([A-Z]+)(\d+)$/);
+  if (!insertedMatch) {
+    return fieldRefToKeyMap(fields);
+  }
+
+  const [, insertedColumn, insertedRowText] = insertedMatch;
+  const insertedRow = Number(insertedRowText);
+  return Object.fromEntries(
+    fields
+      .filter((field) => field.key !== insertedKey)
+      .map((field) => {
+        const match = field.ref.match(/^([A-Z]+)(\d+)$/);
+        if (!match || match[1] !== insertedColumn || Number(match[2]) <= insertedRow) {
+          return [field.ref, field.key ?? field.ref];
+        }
+        return [`${match[1]}${Number(match[2]) - 1}`, field.key ?? field.ref];
+      }),
+  );
+}
+
 function addImportWarning(warnings, context, field) {
   warnings.push(`${context}: ${field}`);
 }
@@ -436,12 +483,26 @@ function serializeBuild(build) {
   };
 }
 
+function serializeStoredBuild(build) {
+  return {
+    id: build.id,
+    ...serializeBuild(build),
+  };
+}
+
 function serializeWeapon(weapon) {
   return {
     name: weapon.name,
     compareEnabled: weapon.compareEnabled !== false,
     isRift: Boolean(weapon.isRift),
     properties: semanticValuesFromCurrent(weapon.values, state.data.weaponFields),
+  };
+}
+
+function serializeStoredWeapon(weapon) {
+  return {
+    id: weapon.id,
+    ...serializeWeapon(weapon),
   };
 }
 
@@ -481,7 +542,11 @@ function normalizeBuildItem(item, { source = "current", preserveId = false, warn
       : semanticValuesFromInput(
           item?.values,
           state.data.buildFields,
-          source === "legacy" ? LEGACY_BUILD_REF_TO_KEY : fieldRefToKeyMap(state.data.buildFields),
+          source === "legacy"
+            ? LEGACY_BUILD_REF_TO_KEY
+            : source === "previous"
+              ? previousVersionRefToKeyMap(state.data.buildFields, "elementalRelease")
+              : fieldRefToKeyMap(state.data.buildFields),
           warnings,
           context,
         );
@@ -503,7 +568,11 @@ function normalizeBuildUptimes(values, { source = "current", warnings = [] } = {
   const semanticValues = semanticValuesFromInput(
     values,
     state.uptimeFields,
-    source === "legacy" ? LEGACY_UPTIME_REF_TO_KEY : fieldRefToKeyMap(state.uptimeFields),
+    source === "legacy"
+      ? LEGACY_UPTIME_REF_TO_KEY
+      : source === "previous"
+        ? previousVersionRefToKeyMap(state.uptimeFields, "elementalRelease")
+        : fieldRefToKeyMap(state.uptimeFields),
     warnings,
     context,
   );
@@ -552,6 +621,11 @@ function loadBuildsForCurrentVersion() {
     return currentBuilds.map((build) => normalizeBuildItem(build, { source: "current", preserveId: true }));
   }
 
+  const previousBuilds = loadStoredItems(PREVIOUS_STORAGE_KEYS.builds);
+  if (previousBuilds.length) {
+    return previousBuilds.map((build) => normalizeBuildItem(build, { source: "previous", preserveId: true }));
+  }
+
   const legacyBuilds = loadStoredItems(LEGACY_STORAGE_KEYS.builds);
   if (!legacyBuilds.length) {
     return [];
@@ -575,6 +649,11 @@ function loadWeaponsForCurrentVersion() {
     return currentWeapons.map((weapon) => normalizeWeaponItem(weapon, { source: "current", preserveId: true }));
   }
 
+  const previousWeapons = loadStoredItems(PREVIOUS_STORAGE_KEYS.weapons);
+  if (previousWeapons.length) {
+    return previousWeapons.map((weapon) => normalizeWeaponItem(weapon, { source: "current", preserveId: true }));
+  }
+
   const legacyWeapons = loadStoredItems(LEGACY_STORAGE_KEYS.weapons);
   if (!legacyWeapons.length) {
     return [];
@@ -596,6 +675,11 @@ function loadUptimesForCurrentVersion() {
   const currentUptimes = loadStoredObject(STORAGE_KEYS.uptimes, null);
   if (currentUptimes) {
     return normalizeBuildUptimes(currentUptimes, { source: "current" });
+  }
+
+  const previousUptimes = loadStoredObject(PREVIOUS_STORAGE_KEYS.uptimes, null);
+  if (previousUptimes) {
+    return normalizeBuildUptimes(previousUptimes, { source: "previous" });
   }
 
   const legacyUptimes = loadStoredObject(LEGACY_STORAGE_KEYS.uptimes, null);
@@ -721,7 +805,10 @@ function updateUptimeFeedback(input, field) {
 }
 
 function persistUptimes() {
-  localStorage.setItem(STORAGE_KEYS.uptimes, JSON.stringify(state.uptimeValues));
+  localStorage.setItem(
+    STORAGE_KEYS.uptimes,
+    JSON.stringify(semanticValuesFromCurrent(state.uptimeValues, state.uptimeFields)),
+  );
 }
 
 function setAllBuildsCompareEnabled(compareEnabled) {
@@ -1222,9 +1309,13 @@ function renderBuildForm() {
   els.buildForm.classList.remove("hidden");
   state.buildEditorColumnCount = getBuildEditorColumnCount();
   const labels = getBuildLabels(state.buildDraft, buildDefaultWeapon());
+  const sortedFields = sortBuildFieldsAlphabetically(state.data.buildFields, labels);
 
-  const fieldsMarkup = orderBuildFieldsByVisibleColumn(state.data.buildFields)
+  const fieldsMarkup = orderBuildFieldsByVisibleColumn(sortedFields)
     .map((field) => {
+      if (!field) {
+        return '<div class="editor-row editor-row-placeholder" aria-hidden="true"></div>';
+      }
       const label = labels[field.ref] ?? field.labelRef;
       const value = state.buildDraft.values[field.ref];
       const isActive = Number(value) !== 0;
@@ -1424,11 +1515,11 @@ function renderWeaponForm() {
 }
 
 function persistBuilds() {
-  saveStoredItems(STORAGE_KEYS.builds, state.builds);
+  saveStoredItems(STORAGE_KEYS.builds, state.builds.map(serializeStoredBuild));
 }
 
 function persistWeapons() {
-  saveStoredItems(STORAGE_KEYS.weapons, state.weapons);
+  saveStoredItems(STORAGE_KEYS.weapons, state.weapons.map(serializeStoredWeapon));
 }
 
 function moveLibraryItem(items, id, direction) {
@@ -1511,6 +1602,17 @@ function saveWeaponDraft() {
   renderAll();
 }
 
+function nextCopyName(name, fallbackName) {
+  const currentName = String(name || fallbackName);
+  const copyMatch = /^(.*) \(Copy(?: (\d+))?\)$/.exec(currentName);
+  if (!copyMatch) {
+    return `${currentName} (Copy)`;
+  }
+
+  const nextNumber = copyMatch[2] ? Number(copyMatch[2]) + 1 : 2;
+  return `${copyMatch[1]} (Copy ${nextNumber})`;
+}
+
 function duplicateCurrentBuildDraft() {
   if (!state.buildDraft) {
     return;
@@ -1519,7 +1621,7 @@ function duplicateCurrentBuildDraft() {
   const payload = {
     ...deepClone(state.buildDraft),
     id: makeId(),
-    name: `Duplicate of ${state.buildDraft.name || "Unnamed Build"}`,
+    name: nextCopyName(state.buildDraft.name, "Unnamed Build"),
   };
 
   state.builds = [...state.builds, payload];
@@ -1540,7 +1642,7 @@ function duplicateCurrentWeaponDraft() {
   const payload = {
     ...deepClone(state.weaponDraft),
     id: makeId(),
-    name: `Duplicate of ${state.weaponDraft.name || "Unnamed Weapon"}`,
+    name: nextCopyName(state.weaponDraft.name, "Unnamed Weapon"),
   };
 
   state.weapons = [...state.weapons, payload];
@@ -2216,6 +2318,7 @@ async function init() {
     ...buildDefaultUptimeValues(),
     ...loadUptimesForCurrentVersion(),
   };
+  persistUptimes();
 
   if (!state.builds.length) {
     state.builds = [buildDefaultBuild()];
@@ -2243,8 +2346,12 @@ async function init() {
   }));
   persistWeapons();
 
-  const storedBuildId = loadStoredValue(STORAGE_KEYS.selectedBuildId) ?? loadStoredValue(LEGACY_STORAGE_KEYS.selectedBuildId);
-  const storedWeaponId = loadStoredValue(STORAGE_KEYS.selectedWeaponId) ?? loadStoredValue(LEGACY_STORAGE_KEYS.selectedWeaponId);
+  const storedBuildId = loadStoredValue(STORAGE_KEYS.selectedBuildId)
+    ?? loadStoredValue(PREVIOUS_STORAGE_KEYS.selectedBuildId)
+    ?? loadStoredValue(LEGACY_STORAGE_KEYS.selectedBuildId);
+  const storedWeaponId = loadStoredValue(STORAGE_KEYS.selectedWeaponId)
+    ?? loadStoredValue(PREVIOUS_STORAGE_KEYS.selectedWeaponId)
+    ?? loadStoredValue(LEGACY_STORAGE_KEYS.selectedWeaponId);
   state.selectedBuildId = getBuildById(storedBuildId)?.id ?? state.builds[0].id;
   state.selectedWeaponId = getWeaponById(storedWeaponId)?.id ?? state.weapons[0].id;
   saveStoredValue(STORAGE_KEYS.selectedBuildId, state.selectedBuildId);
