@@ -127,6 +127,28 @@ const LEGACY_UPTIME_REF_TO_KEY = Object.freeze({
   E47: "weaknessExploit",
 });
 
+const MODAL_MODE_CLASSES = [
+  "modal-window-compact",
+  "modal-window-medium",
+  "modal-window-uptime",
+];
+
+const LIBRARY_ACTION_HANDLERS = {
+  "edit-build": (id) => editBuild(id),
+  "delete-build": (id) => deleteBuild(id),
+  "move-build-up": (id) => moveBuild(id, -1),
+  "move-build-down": (id) => moveBuild(id, 1),
+  "edit-weapon": (id) => editWeapon(id),
+  "delete-weapon": (id) => deleteWeapon(id),
+  "move-weapon-up": (id) => moveWeapon(id, -1),
+  "move-weapon-down": (id) => moveWeapon(id, 1),
+};
+
+const COMPARE_COLLECTION_BY_LIST_ID = {
+  "build-list": "builds",
+  "weapon-list": "weapons",
+};
+
 const state = {
   data: null,
   builds: [],
@@ -387,6 +409,16 @@ function saveStoredValue(key, value) {
   localStorage.setItem(key, value);
 }
 
+function loadFirstStoredValue(keys) {
+  for (const key of keys) {
+    const value = loadStoredValue(key);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function loadStoredObject(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -432,6 +464,16 @@ function previousVersionRefToKeyMap(fields, insertedKey) {
 
 function addImportWarning(warnings, context, field) {
   warnings.push(`${context}: ${field}`);
+}
+
+function refToKeyMapForSource(fields, source, previousInsertedKey, legacyMap) {
+  if (source === "legacy") {
+    return legacyMap;
+  }
+  if (source === "previous") {
+    return previousVersionRefToKeyMap(fields, previousInsertedKey);
+  }
+  return fieldRefToKeyMap(fields);
 }
 
 function semanticValuesFromCurrent(values, fields) {
@@ -536,20 +578,16 @@ function normalizeBuildItem(item, { source = "current", preserveId = false, warn
   const base = buildDefaultBuild();
   const name = String(item?.name || "Imported Build");
   const context = `Build "${name}"`;
+  const sourceRefToKey = refToKeyMapForSource(
+    state.data.buildFields,
+    source,
+    "elementalRelease",
+    LEGACY_BUILD_REF_TO_KEY,
+  );
   const semanticValues =
     item?.skills && typeof item.skills === "object"
       ? semanticValuesFromInput(item.skills, state.data.buildFields, {}, warnings, context)
-      : semanticValuesFromInput(
-          item?.values,
-          state.data.buildFields,
-          source === "legacy"
-            ? LEGACY_BUILD_REF_TO_KEY
-            : source === "previous"
-              ? previousVersionRefToKeyMap(state.data.buildFields, "elementalRelease")
-              : fieldRefToKeyMap(state.data.buildFields),
-          warnings,
-          context,
-        );
+      : semanticValuesFromInput(item?.values, state.data.buildFields, sourceRefToKey, warnings, context);
 
   return {
     ...base,
@@ -565,14 +603,16 @@ function normalizeBuildItem(item, { source = "current", preserveId = false, warn
 
 function normalizeBuildUptimes(values, { source = "current", warnings = [] } = {}) {
   const context = "Uptimes";
+  const sourceRefToKey = refToKeyMapForSource(
+    state.uptimeFields,
+    source,
+    "elementalRelease",
+    LEGACY_UPTIME_REF_TO_KEY,
+  );
   const semanticValues = semanticValuesFromInput(
     values,
     state.uptimeFields,
-    source === "legacy"
-      ? LEGACY_UPTIME_REF_TO_KEY
-      : source === "previous"
-        ? previousVersionRefToKeyMap(state.uptimeFields, "elementalRelease")
-        : fieldRefToKeyMap(state.uptimeFields),
+    sourceRefToKey,
     warnings,
     context,
   );
@@ -587,16 +627,16 @@ function normalizeWeaponItem(item, { source = "current", preserveId = false, war
   const base = buildDefaultWeapon();
   const name = String(item?.name || "Imported Weapon");
   const context = `Weapon "${name}"`;
+  const sourceRefToKey = refToKeyMapForSource(
+    state.data.weaponFields,
+    source,
+    null,
+    LEGACY_WEAPON_REF_TO_KEY,
+  );
   const semanticValues =
     item?.properties && typeof item.properties === "object"
       ? semanticValuesFromInput(item.properties, state.data.weaponFields, {}, warnings, context)
-      : semanticValuesFromInput(
-          item?.values,
-          state.data.weaponFields,
-          source === "legacy" ? LEGACY_WEAPON_REF_TO_KEY : fieldRefToKeyMap(state.data.weaponFields),
-          warnings,
-          context,
-        );
+      : semanticValuesFromInput(item?.values, state.data.weaponFields, sourceRefToKey, warnings, context);
 
   return {
     ...base,
@@ -615,84 +655,80 @@ function normalizeImportedWeapon(item, warnings = [], source = "legacy") {
   return normalizeWeaponItem(item, { source, warnings });
 }
 
+function loadMigratedItems(sources, normalizeItem, warningLabel) {
+  for (const source of sources) {
+    const items = loadStoredItems(source.key);
+    if (!items.length) {
+      continue;
+    }
+
+    const warnings = [];
+    const migrated = items.map((item) =>
+      normalizeItem(item, {
+        source: source.source,
+        preserveId: true,
+        warnings,
+      }),
+    );
+    if (warnings.length) {
+      console.warn(`Some ${warningLabel} fields could not be migrated:`, warnings);
+    }
+    return migrated;
+  }
+  return [];
+}
+
+function loadMigratedObject(sources, normalizeObject, warningLabel, fallback = {}) {
+  for (const source of sources) {
+    const value = loadStoredObject(source.key, null);
+    if (!value) {
+      continue;
+    }
+
+    const warnings = [];
+    const migrated = normalizeObject(value, { source: source.source, warnings });
+    if (warnings.length) {
+      console.warn(`Some ${warningLabel} fields could not be migrated:`, warnings);
+    }
+    return migrated;
+  }
+  return fallback;
+}
+
 function loadBuildsForCurrentVersion() {
-  const currentBuilds = loadStoredItems(STORAGE_KEYS.builds);
-  if (currentBuilds.length) {
-    return currentBuilds.map((build) => normalizeBuildItem(build, { source: "current", preserveId: true }));
-  }
-
-  const previousBuilds = loadStoredItems(PREVIOUS_STORAGE_KEYS.builds);
-  if (previousBuilds.length) {
-    return previousBuilds.map((build) => normalizeBuildItem(build, { source: "previous", preserveId: true }));
-  }
-
-  const legacyBuilds = loadStoredItems(LEGACY_STORAGE_KEYS.builds);
-  if (!legacyBuilds.length) {
-    return [];
-  }
-
-  const warnings = [];
-  const migrated = legacyBuilds.map((build) => normalizeBuildItem(build, {
-    source: "legacy",
-    preserveId: true,
-    warnings,
-  }));
-  if (warnings.length) {
-    console.warn("Some legacy build fields could not be migrated:", warnings);
-  }
-  return migrated;
+  return loadMigratedItems(
+    [
+      { key: STORAGE_KEYS.builds, source: "current" },
+      { key: PREVIOUS_STORAGE_KEYS.builds, source: "previous" },
+      { key: LEGACY_STORAGE_KEYS.builds, source: "legacy" },
+    ],
+    normalizeBuildItem,
+    "build",
+  );
 }
 
 function loadWeaponsForCurrentVersion() {
-  const currentWeapons = loadStoredItems(STORAGE_KEYS.weapons);
-  if (currentWeapons.length) {
-    return currentWeapons.map((weapon) => normalizeWeaponItem(weapon, { source: "current", preserveId: true }));
-  }
-
-  const previousWeapons = loadStoredItems(PREVIOUS_STORAGE_KEYS.weapons);
-  if (previousWeapons.length) {
-    return previousWeapons.map((weapon) => normalizeWeaponItem(weapon, { source: "current", preserveId: true }));
-  }
-
-  const legacyWeapons = loadStoredItems(LEGACY_STORAGE_KEYS.weapons);
-  if (!legacyWeapons.length) {
-    return [];
-  }
-
-  const warnings = [];
-  const migrated = legacyWeapons.map((weapon) => normalizeWeaponItem(weapon, {
-    source: "legacy",
-    preserveId: true,
-    warnings,
-  }));
-  if (warnings.length) {
-    console.warn("Some legacy weapon fields could not be migrated:", warnings);
-  }
-  return migrated;
+  return loadMigratedItems(
+    [
+      { key: STORAGE_KEYS.weapons, source: "current" },
+      { key: PREVIOUS_STORAGE_KEYS.weapons, source: "current" },
+      { key: LEGACY_STORAGE_KEYS.weapons, source: "legacy" },
+    ],
+    normalizeWeaponItem,
+    "weapon",
+  );
 }
 
 function loadUptimesForCurrentVersion() {
-  const currentUptimes = loadStoredObject(STORAGE_KEYS.uptimes, null);
-  if (currentUptimes) {
-    return normalizeBuildUptimes(currentUptimes, { source: "current" });
-  }
-
-  const previousUptimes = loadStoredObject(PREVIOUS_STORAGE_KEYS.uptimes, null);
-  if (previousUptimes) {
-    return normalizeBuildUptimes(previousUptimes, { source: "previous" });
-  }
-
-  const legacyUptimes = loadStoredObject(LEGACY_STORAGE_KEYS.uptimes, null);
-  if (!legacyUptimes) {
-    return {};
-  }
-
-  const warnings = [];
-  const migrated = normalizeBuildUptimes(legacyUptimes, { source: "legacy", warnings });
-  if (warnings.length) {
-    console.warn("Some legacy uptime fields could not be migrated:", warnings);
-  }
-  return migrated;
+  return loadMigratedObject(
+    [
+      { key: STORAGE_KEYS.uptimes, source: "current" },
+      { key: PREVIOUS_STORAGE_KEYS.uptimes, source: "previous" },
+      { key: LEGACY_STORAGE_KEYS.uptimes, source: "legacy" },
+    ],
+    normalizeBuildUptimes,
+    "uptime",
+  );
 }
 
 function stableStringify(value) {
@@ -938,6 +974,27 @@ function buildDefaultWeapon() {
   };
 }
 
+function normalizeRuntimeBuild(build) {
+  const base = buildDefaultBuild();
+  return {
+    ...base,
+    ...build,
+    values: { ...base.values, ...build.values },
+    compareEnabled: typeof build.compareEnabled === "boolean" ? build.compareEnabled : true,
+  };
+}
+
+function normalizeRuntimeWeapon(weapon) {
+  const base = buildDefaultWeapon();
+  return {
+    ...base,
+    ...weapon,
+    values: { ...base.values, ...weapon.values },
+    isRift: Boolean(weapon.isRift),
+    compareEnabled: typeof weapon.compareEnabled === "boolean" ? weapon.compareEnabled : true,
+  };
+}
+
 function getBuildById(id) {
   return state.builds.find((item) => item.id === id) ?? null;
 }
@@ -1107,13 +1164,13 @@ function renderSelectionActions() {
 }
 
 function openRiftUnavailableMessage() {
-  els.modalTitle.textContent = "Rift Combinations";
-  els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-medium");
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
-  els.riftModalContent.innerHTML = `
+  openModal({
+    title: "Rift Combinations",
+    mode: "medium",
+    content: `
     <div class="comparison-intro">This option is only available with rift base weapons.</div>
-  `;
-  els.riftModal.classList.remove("hidden");
+  `,
+  });
 }
 
 function openUptimesModal() {
@@ -1126,11 +1183,10 @@ function renderUptimesModal() {
     return;
   }
 
-  els.modalTitle.textContent = "View/Edit Uptimes";
-  els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-uptime");
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-medium");
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
-  els.riftModalContent.innerHTML = `
+  openModal({
+    title: "View/Edit Uptimes",
+    mode: "uptime",
+    content: `
     <div class="editor-actions-row uptime-actions-row">
       <button type="button" id="save-uptimes">Save Values</button>
       <button class="secondary" type="button" id="revert-uptimes">Revert to Default (KreaTV1 sheet)</button>
@@ -1156,7 +1212,8 @@ function renderUptimesModal() {
         })
         .join("")}
     </div>
-  `;
+  `,
+  });
 
   els.riftModalContent.querySelectorAll("[data-uptime-field]").forEach((input) => {
     input.addEventListener("input", (event) => {
@@ -1191,7 +1248,6 @@ function renderUptimesModal() {
     closeModal();
   });
 
-  els.riftModal.classList.remove("hidden");
 }
 
 function renderSkillSummary() {
@@ -1832,9 +1888,10 @@ function openRiftComparison() {
     });
   const topValue = variants.find((variant) => typeof variant.h12 === "number")?.h12;
 
-  els.modalTitle.textContent = "Rift Combinations";
-  els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-compact");
-  els.riftModalContent.innerHTML = `
+  openModal({
+    title: "Rift Combinations",
+    mode: "compact",
+    content: `
     <div class="rift-context">
       <div><span class="rift-context-label">Build:</span> ${escapeHtml(build.name)} <span class="rift-context-separator">|</span> <span class="rift-context-label">Weapon:</span> ${escapeHtml(weapon.name)}</div>
     </div>
@@ -1868,7 +1925,8 @@ function openRiftComparison() {
         )
         .join("")}
     </div>
-  `;
+  `,
+  });
   els.riftModalContent.querySelectorAll("[data-rift-variant-index]").forEach((button) => {
     button.addEventListener("click", () => {
       const variant = variants[Number(button.dataset.riftVariantIndex)];
@@ -1878,7 +1936,6 @@ function openRiftComparison() {
       startWeaponDraftFromRiftVariant(weapon, variant);
     });
   });
-  els.riftModal.classList.remove("hidden");
 }
 
 function buildMatrixKey(buildId, weaponId) {
@@ -1889,13 +1946,13 @@ function openBuildWeaponComparison() {
   const buildsToCompare = state.builds.filter((build) => build.compareEnabled !== false);
   const weaponsToCompare = state.weapons.filter((weapon) => weapon.compareEnabled !== false);
   if (!buildsToCompare.length || !weaponsToCompare.length) {
-    els.modalTitle.textContent = "Build and Weapon Comparison";
-    els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-medium");
-    els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
-    els.riftModalContent.innerHTML = `
+    openModal({
+      title: "Build and Weapon Comparison",
+      mode: "medium",
+      content: `
       <div class="comparison-intro">Select at least one build and one weapon with the checkboxes before running the comparison.</div>
-    `;
-    els.riftModal.classList.remove("hidden");
+    `,
+    });
     return;
   }
 
@@ -1929,10 +1986,10 @@ function openExportModal(payload = exportAppData(), description = "Copy this str
     exportSummary = `Exporting: ${buildCount} builds, ${weaponCount} weapons`;
   } catch {}
 
-  els.modalTitle.textContent = "Export Data";
-  els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-medium");
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
-  els.riftModalContent.innerHTML = `
+  openModal({
+    title: "Export Data",
+    mode: "medium",
+    content: `
     <div class="transfer-copy">
       <p class="comparison-intro">${escapeHtml(description)}</p>
       <div class="transfer-summary">${escapeHtml(exportSummary)}</div>
@@ -1942,7 +1999,8 @@ function openExportModal(payload = exportAppData(), description = "Copy this str
       </div>
       <div class="transfer-feedback" id="transfer-feedback"></div>
     </div>
-  `;
+  `,
+  });
   els.riftModalContent.querySelector("#export-payload").value = payload;
   els.riftModalContent.querySelector("#copy-export-payload").addEventListener("click", async () => {
     const feedback = els.riftModalContent.querySelector("#transfer-feedback");
@@ -1953,14 +2011,13 @@ function openExportModal(payload = exportAppData(), description = "Copy this str
       feedback.textContent = "Copy failed. Select the text and copy it manually.";
     }
   });
-  els.riftModal.classList.remove("hidden");
 }
 
 function openImportModal() {
-  els.modalTitle.textContent = "Import Data";
-  els.riftModal.querySelector(".modal-window")?.classList.add("modal-window-medium");
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
-  els.riftModalContent.innerHTML = `
+  openModal({
+    title: "Import Data",
+    mode: "medium",
+    content: `
     <div class="transfer-copy">
       <p class="comparison-intro">Paste an exported string below. Imported builds and weapons will be added to the current data.</p>
       <textarea class="transfer-textarea" id="import-payload" placeholder="Paste export string here"></textarea>
@@ -1969,7 +2026,8 @@ function openImportModal() {
       </div>
       <div class="transfer-feedback" id="transfer-feedback"></div>
     </div>
-  `;
+  `,
+  });
   els.riftModalContent.querySelector("#submit-import-payload").addEventListener("click", () => {
     const payload = els.riftModalContent.querySelector("#import-payload").value.trim();
     const feedback = els.riftModalContent.querySelector("#transfer-feedback");
@@ -2032,7 +2090,6 @@ function openImportModal() {
       feedback.textContent = "Import failed. Check that the pasted string is a valid export.";
     }
   });
-  els.riftModal.classList.remove("hidden");
 }
 
 function renderBuildWeaponComparison() {
@@ -2099,9 +2156,9 @@ function renderBuildWeaponComparison() {
     })
     .join("");
 
-  els.modalTitle.textContent = "Build and Weapon Comparison";
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
-  els.riftModalContent.innerHTML = `
+  openModal({
+    title: "Build and Weapon Comparison",
+    content: `
     <div class="comparison-intro">
       Click any cell to use it as the reference. The selected reference shows 100.00%, and all other cells show relative DPS difference against it.
     </div>
@@ -2118,7 +2175,8 @@ function renderBuildWeaponComparison() {
         </tbody>
       </table>
     </div>
-  `;
+  `,
+  });
 
   els.riftModalContent.querySelectorAll("[data-matrix-build-id]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2128,15 +2186,31 @@ function renderBuildWeaponComparison() {
     });
   });
 
+}
+
+function setModalMode(mode = null) {
+  const modalWindow = els.riftModal.querySelector(".modal-window");
+  if (!modalWindow) {
+    return;
+  }
+
+  modalWindow.classList.remove(...MODAL_MODE_CLASSES);
+  if (mode) {
+    modalWindow.classList.add(`modal-window-${mode}`);
+  }
+}
+
+function openModal({ title, content, mode = null }) {
+  els.modalTitle.textContent = title;
+  setModalMode(mode);
+  els.riftModalContent.innerHTML = content;
   els.riftModal.classList.remove("hidden");
 }
 
 function closeModal() {
   state.matrixComparison = null;
   state.uptimeDraft = null;
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-compact");
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-medium");
-  els.riftModal.querySelector(".modal-window")?.classList.remove("modal-window-uptime");
+  setModalMode();
   els.riftModal.classList.add("hidden");
   els.riftModalContent.innerHTML = "";
 }
@@ -2147,6 +2221,39 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function handleLibraryAction(action, id) {
+  LIBRARY_ACTION_HANDLERS[action]?.(id);
+}
+
+function updateCompareSelection(collectionName, id, compareEnabled) {
+  if (collectionName === "builds") {
+    state.builds = state.builds.map((build) =>
+      build.id === id ? { ...build, compareEnabled } : build,
+    );
+    persistBuilds();
+    renderBuildList();
+    return;
+  }
+
+  if (collectionName === "weapons") {
+    state.weapons = state.weapons.map((weapon) =>
+      weapon.id === id ? { ...weapon, compareEnabled } : weapon,
+    );
+    persistWeapons();
+    renderWeaponList();
+  }
+}
+
+function handleCompareToggle(checkbox) {
+  const listId = checkbox.closest("[id]")?.id;
+  const collectionName = COMPARE_COLLECTION_BY_LIST_ID[listId];
+  if (!collectionName) {
+    return;
+  }
+
+  updateCompareSelection(collectionName, checkbox.dataset.id, checkbox.checked);
 }
 
 function wireGlobalEvents() {
@@ -2236,24 +2343,7 @@ function wireGlobalEvents() {
   document.body.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
     if (button) {
-      const { action, id } = button.dataset;
-      if (action === "edit-build") {
-        editBuild(id);
-      } else if (action === "delete-build") {
-        deleteBuild(id);
-      } else if (action === "move-build-up") {
-        moveBuild(id, -1);
-      } else if (action === "move-build-down") {
-        moveBuild(id, 1);
-      } else if (action === "edit-weapon") {
-        editWeapon(id);
-      } else if (action === "delete-weapon") {
-        deleteWeapon(id);
-      } else if (action === "move-weapon-up") {
-        moveWeapon(id, -1);
-      } else if (action === "move-weapon-down") {
-        moveWeapon(id, 1);
-      }
+      handleLibraryAction(button.dataset.action, button.dataset.id);
       return;
     }
 
@@ -2262,23 +2352,7 @@ function wireGlobalEvents() {
       return;
     }
 
-    const containerId = checkbox.closest("[id]")?.id;
-    if (containerId === "build-list") {
-      state.builds = state.builds.map((build) =>
-        build.id === checkbox.dataset.id ? { ...build, compareEnabled: checkbox.checked } : build,
-      );
-      persistBuilds();
-      renderBuildList();
-      return;
-    }
-
-    if (containerId === "weapon-list") {
-      state.weapons = state.weapons.map((weapon) =>
-        weapon.id === checkbox.dataset.id ? { ...weapon, compareEnabled: checkbox.checked } : weapon,
-      );
-      persistWeapons();
-      renderWeaponList();
-    }
+    handleCompareToggle(checkbox);
   });
 
   window.addEventListener("resize", () => {
@@ -2329,29 +2403,22 @@ async function init() {
     persistWeapons();
   }
 
-  state.builds = state.builds.map((build) => ({
-    ...buildDefaultBuild(),
-    ...build,
-    values: { ...buildDefaultBuild().values, ...build.values },
-    compareEnabled: typeof build.compareEnabled === "boolean" ? build.compareEnabled : true,
-  }));
+  state.builds = state.builds.map(normalizeRuntimeBuild);
   persistBuilds();
 
-  state.weapons = state.weapons.map((weapon) => ({
-    ...buildDefaultWeapon(),
-    ...weapon,
-    values: { ...buildDefaultWeapon().values, ...weapon.values },
-    isRift: Boolean(weapon.isRift),
-    compareEnabled: typeof weapon.compareEnabled === "boolean" ? weapon.compareEnabled : true,
-  }));
+  state.weapons = state.weapons.map(normalizeRuntimeWeapon);
   persistWeapons();
 
-  const storedBuildId = loadStoredValue(STORAGE_KEYS.selectedBuildId)
-    ?? loadStoredValue(PREVIOUS_STORAGE_KEYS.selectedBuildId)
-    ?? loadStoredValue(LEGACY_STORAGE_KEYS.selectedBuildId);
-  const storedWeaponId = loadStoredValue(STORAGE_KEYS.selectedWeaponId)
-    ?? loadStoredValue(PREVIOUS_STORAGE_KEYS.selectedWeaponId)
-    ?? loadStoredValue(LEGACY_STORAGE_KEYS.selectedWeaponId);
+  const storedBuildId = loadFirstStoredValue([
+    STORAGE_KEYS.selectedBuildId,
+    PREVIOUS_STORAGE_KEYS.selectedBuildId,
+    LEGACY_STORAGE_KEYS.selectedBuildId,
+  ]);
+  const storedWeaponId = loadFirstStoredValue([
+    STORAGE_KEYS.selectedWeaponId,
+    PREVIOUS_STORAGE_KEYS.selectedWeaponId,
+    LEGACY_STORAGE_KEYS.selectedWeaponId,
+  ]);
   state.selectedBuildId = getBuildById(storedBuildId)?.id ?? state.builds[0].id;
   state.selectedWeaponId = getWeaponById(storedWeaponId)?.id ?? state.weapons[0].id;
   saveStoredValue(STORAGE_KEYS.selectedBuildId, state.selectedBuildId);
