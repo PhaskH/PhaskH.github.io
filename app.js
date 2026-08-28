@@ -1847,19 +1847,42 @@ function describeRiftUpgradeSequence(counts, isRaw) {
   return upgrades.join(", ");
 }
 
-function startWeaponDraftFromRiftVariant(baseWeapon, variant) {
+function buildSavedRiftWeapon(baseWeapon, variant) {
   const label = describeRiftVariant(variant.counts, baseWeapon.values.E5 === "Raw");
-  state.editingWeaponId = null;
-  state.weaponDraft = {
+  return {
     ...deepClone(variant.weapon),
-    id: makeId(),
     name: `${baseWeapon.name} (${label || "Rift"})`,
     isRift: false,
+    compareEnabled: true,
   };
-  closeModal();
-  renderWeaponForm();
-  renderWeaponList();
-  scrollEditorIntoView(els.weaponForm);
+}
+
+function isRiftVariantSaved(baseWeapon, variant) {
+  const fingerprint = weaponImportFingerprint(buildSavedRiftWeapon(baseWeapon, variant));
+  return state.weapons.some((weapon) => weaponImportFingerprint(weapon) === fingerprint);
+}
+
+function markRiftVariantSaved(button) {
+  button.textContent = "Saved";
+  button.disabled = true;
+  button.classList.add("rift-save-button-saved");
+  button.closest(".rift-result-item")?.classList.add("rift-result-item-saved");
+}
+
+function saveRiftVariant(baseWeapon, variant, button) {
+  const savedWeapon = buildSavedRiftWeapon(baseWeapon, variant);
+  const fingerprint = weaponImportFingerprint(savedWeapon);
+  const alreadySaved = state.weapons.some((weapon) => weaponImportFingerprint(weapon) === fingerprint);
+
+  if (!alreadySaved) {
+    state.weapons = [...state.weapons, { ...savedWeapon, id: makeId() }];
+    persistWeapons();
+    renderCalculatorSelectors();
+    renderWeaponList();
+    renderWeaponTypeShortcut();
+  }
+
+  markRiftVariantSaved(button);
 }
 
 function openRiftComparison() {
@@ -1879,6 +1902,7 @@ function openRiftComparison() {
         label: describeRiftVariant(variant.counts, isRaw),
         upgradeSequence: describeRiftUpgradeSequence(variant.counts, isRaw),
         h12: readCell(engine, calculatorSheetName(), state.data.resultCell),
+        isSaved: isRiftVariantSaved(weapon, variant),
       };
     })
     .sort((a, b) => {
@@ -1907,7 +1931,7 @@ function openRiftComparison() {
               index === 0 && typeof variant.h12 === "number" ? "100.00%" : formatSignedPercent(relativePercent);
 
             return `
-            <div class="rift-result-item">
+            <div class="rift-result-item ${variant.isSaved ? "rift-result-item-saved" : ""}">
               <div>
                 <div>${escapeHtml(variant.label || "No bonus")}</div>
                 <div class="rift-result-label">${escapeHtml(variant.upgradeSequence || "attack, attack, attack")}</div>
@@ -1917,7 +1941,7 @@ function openRiftComparison() {
                   <div class="rift-result-value">${escapeHtml(formatResult(variant.h12))}</div>
                   <div class="rift-result-relative">${escapeHtml(relativeLabel)}</div>
                 </div>
-                <button class="secondary" type="button" data-rift-variant-index="${index}">Use In Weapon Editor</button>
+                <button class="secondary rift-save-button ${variant.isSaved ? "rift-save-button-saved" : ""}" type="button" data-rift-variant-index="${index}" ${variant.isSaved ? "disabled" : ""}>${variant.isSaved ? "Saved" : "Save Weapon"}</button>
               </div>
             </div>
           `;
@@ -1933,7 +1957,7 @@ function openRiftComparison() {
       if (!variant) {
         return;
       }
-      startWeaponDraftFromRiftVariant(weapon, variant);
+      saveRiftVariant(weapon, variant, button);
     });
   });
 }

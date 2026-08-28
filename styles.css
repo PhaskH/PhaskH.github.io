@@ -695,6 +695,11 @@ button.danger:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.rift-result-item-saved {
+  border-color: rgba(83, 179, 125, 0.65);
+  background: rgba(83, 179, 125, 0.08);
+}
+
 .rift-result-label {
   color: var(--muted);
   font-size: 0.88rem;
@@ -731,6 +736,15 @@ button.danger:hover {
   width: auto;
   min-height: 32px;
   padding: 6px 10px;
+}
+
+.rift-result-actions .rift-save-button-saved,
+.rift-result-actions .rift-save-button-saved:hover {
+  border-color: var(--success);
+  background: rgba(83, 179, 125, 0.18);
+  color: #d7f2e1;
+  cursor: default;
+  opacity: 1;
 }
 
 .comparison-intro {
